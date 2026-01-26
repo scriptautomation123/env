@@ -1,7 +1,7 @@
 # env
 
 ## on windows 
-C:\Users\swapa\.wslcomfig
+C:\Users\swapa\.wslconfig
 
 ```
 [wsl2]
