@@ -1,0 +1,47 @@
+{
+  "name": "Java Development Container",
+  "image": "mcr.microsoft.com/devcontainers/java:1-21-bookworm",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "latest",
+      "installMaven": "true",
+      "mavenVersion": "latest",
+      "jdkDistro": "tem"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "eamodio.gitlens",
+        "johnpapa.vscode-peacock",
+        "mechatroner.rainbow-csv",
+        "Oracle.sql-developer",
+        "rafmsou.nicer-high-contrast",
+        "sdras.night-owl",
+        "PKief.material-icon-theme",
+        "shd101wyy.markdown-preview-enhanced",
+        "fisheva.eva-theme",
+        "Upstash.context7-mcp",
+        "ms-azuretools.vscode-containers",
+        "formulahendry.code-runner",
+        "EliverLara.andromeda",
+        "maciejdems.add-to-gitignore",
+        "SonarSource.sonarlint-vscode"
+      ]
+    }
+  },
+
+  "remoteUser": "vscode",
+  
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  "postCreateCommand": "java -version && mvn -version && docker --version && docker compose version"
+}
