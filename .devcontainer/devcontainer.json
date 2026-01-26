@@ -5,12 +5,27 @@
   },
   
   "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "upgradePackages": true,
+      "username": "vscode"
+    },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
       "dockerDashComposeVersion": "v2"
     },
-    "ghcr.io/devcontainers/features/java:1": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "nodeGypDependencies": true,
+      "installYarnUsingApt": false
+    },
+    "ghcr.io/devcontainers/features/python:1": {
       "version": "latest",
+      "installTools": true
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
       "installMaven": "true",
       "mavenVersion": "latest",
       "jdkDistro": "tem"
@@ -45,5 +60,5 @@
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
 
-  "postCreateCommand": "java -version && mvn -version && docker --version && docker compose version"
+  "postCreateCommand": "bash -c 'git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/powerlevel10k && sed -i \"s/ZSH_THEME=\\\"robbyrussell\\\"/ZSH_THEME=\\\"powerlevel10k\\/powerlevel10k\\\"/g\" ~/.zshrc && echo \"POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true\" >> ~/.zshrc && java -version && mvn -version && docker --version && docker compose version'"
 }
