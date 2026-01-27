@@ -1,5 +1,8 @@
 {
   "name": "Java Development Container",
+  // Use pre-built image (uncomment after first workflow run):
+  // "image": "ghcr.io/scriptautomation123/env/devcontainer:latest",
+  // Or build from Dockerfile (current):
   "build": {
     "dockerfile": "Dockerfile"
   },
