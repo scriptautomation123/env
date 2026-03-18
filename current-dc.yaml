@@ -1,0 +1,186 @@
+###############################################################################
+# current-dc.yaml
+# OpenShift 4 DeploymentConfig – Spring Boot 3 / JDK 21 / Embedded Tomcat
+# CURRENT (legacy) TLS configuration using a PKCS12 keystore
+#
+# TLS approach:
+#   • A PKCS12 keystore (keystore.p12) is pre-built outside the container
+#     and stored in an OpenShift Secret.
+#   • The Secret is mounted as a volume at the legacy JBoss EAP path
+#     /opt/eap/standalone/configuration/cert.
+#   • Spring Boot SERVER_SSL_* environment variables point embedded Tomcat
+#     at the mounted keystore.
+#
+# Drawbacks of this approach:
+#   • Requires an offline keytool / openssl step to convert PEM → PKCS12.
+#   • Keystore password must be managed as a separate secret.
+#   • Certificate rotation requires rebuilding the keystore and redeploying.
+#   • The mount path is a vestige of JBoss EAP and has no meaning for
+#     Spring Boot embedded Tomcat.
+###############################################################################
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: "${APP}"
+  labels:
+    app: "${APP}"
+    ait: "${AIT}"
+spec:
+  replicas: "${{REPLICAS}}"
+  selector:
+    name: ${APP}
+  triggers:
+    - type: "ConfigChange"
+  strategy:
+    type: Rolling
+  template:
+    metadata:
+      labels:
+        name: ${APP}
+        app: "${APP}"
+        ait: "${AIT}"
+    spec:
+      containers:
+        - name: "${APP}"
+          image: "${REG}/${AIT}/${IMG}:${TAG}"
+          ports:
+            - containerPort: 8443
+              protocol: TCP
+              name: https
+          env:
+            # ── Spring Boot / Embedded Tomcat TLS (keystore) ──────────
+            - name: SERVER_PORT
+              value: "8443"
+            - name: SERVER_SSL_ENABLED
+              value: "true"
+            - name: SERVER_SSL_KEY_STORE
+              value: "file:/opt/eap/standalone/configuration/cert/keystore.p12"
+            - name: SERVER_SSL_KEY_STORE_TYPE
+              value: "PKCS12"
+            - name: SERVER_SSL_KEY_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "${APP}-keystore-password"
+                  key: password
+            - name: SERVER_SSL_KEY_ALIAS
+              value: "server"
+            # ── Application ───────────────────────────────────────────
+            - name: SERVER_SERVLET_CONTEXT_PATH
+              value: "/${CONTEXT_ROOT}"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "${ZONE}"
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -XX:MaxRAMPercentage=75.0
+                -Djava.security.egd=file:/dev/./urandom
+          # ── Probes ────────────────────────────────────────────────
+          readinessProbe:
+            httpGet:
+              path: /${CONTEXT_ROOT}/actuator/health/readiness
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /${CONTEXT_ROOT}/actuator/health/liveness
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 90
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 6
+          startupProbe:
+            httpGet:
+              path: /${CONTEXT_ROOT}/actuator/health/liveness
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 150
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 12
+          # ── Resources ─────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "${REQUESTS_CPU}"
+              memory: "${REQUESTS_MEM}"
+            limits:
+              cpu: "${LIMITS_CPU}"
+              memory: "${LIMITS_MEM}"
+          # ── Volume mounts ─────────────────────────────────────────
+          volumeMounts:
+            - name: cert-volume
+              readOnly: true
+              mountPath: /opt/eap/standalone/configuration/cert
+          imagePullPolicy: Always
+      imagePullSecrets:
+        - name: "${IMG_SECRETS_REG}"
+      volumes:
+        - name: cert-volume
+          secret:
+            secretName: "${APP}-keystore"
+# ═══════════════════════════════════════════════════════════════════════
+# Parameters
+# ═══════════════════════════════════════════════════════════════════════
+parameters:
+  - name: APP
+    displayName: "Application Name"
+    description: "Unique name to give this instance of the springboot application"
+    required: true
+  - name: REG
+    displayName: "Container Registry"
+    description: "Set this to container registry where builds will push images to, and deployments will pull images from"
+    required: true
+  - name: AIT
+    displayName: "AIT Number"
+    description: "Set this to AIT where builds will push images to, and deployments will pull images from"
+    required: true
+  - name: IMG
+    displayName: "IMG"
+    description: "Image Name"
+    required: true
+  - name: TAG
+    displayName: "Tag"
+    description: "Release Tag"
+    required: true
+  - name: PROJ
+    displayName: "Project"
+    description: "project"
+    required: true
+  - name: ZONE
+    displayName: "Zone"
+    description: "Cluster"
+    required: true
+  - name: CONTEXT_ROOT
+    displayName: "Context Root"
+    description: "Legacy Context Root to support apphost endpoints"
+    required: true
+  - name: REPLICAS
+    displayName: "REPLICAS"
+    description: "REPLICAS"
+    required: true
+  - name: REQUESTS_CPU
+    displayName: "REQUESTS_CPU"
+    description: "REQUESTS_CPU"
+    required: true
+  - name: REQUESTS_MEM
+    displayName: "REQUESTS_MEM"
+    description: "REQUESTS_MEM"
+    required: true
+  - name: LIMITS_CPU
+    displayName: "LIMITS_CPU"
+    description: "LIMITS_CPU"
+    required: true
+  - name: LIMITS_MEM
+    displayName: "LIMITS_MEM"
+    description: "LIMITS_MEM"
+    required: true
+  - name: IMG_SECRETS_REG
+    displayName: "IMG_SECRETS_REG"
+    description: "Image pull secret for the container registry"
+    required: true
