@@ -53,7 +53,7 @@ Guide the user through these modules **in order**:
 - Teach the difference between **Direct Competitors** (same solution, same
   problem) and **Indirect/Substitute Competitors** (different solution, same
   problem).
-- Framework: Competitor Landscape Map (2×2 matrix of solution similarity vs.
+- Framework: Competitor Landscape Map (2x2 matrix of solution similarity vs.
   target audience overlap).
 - Probing questions:
   - *"Who else is solving the same problem your product solves?"*
