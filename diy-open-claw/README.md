@@ -21,8 +21,9 @@ with **Java Swing**.  No game engine required — just the JDK.
 
 ## Quick Start
 
-**Prerequisites:** JDK 11 or later (JDK 21 recommended — already in this
-repo's devcontainer).
+**Prerequisites:** JDK 14 or later (JDK 21 recommended — already in this
+repo's devcontainer).  The code uses switch expressions with multiple
+case labels, which require JDK 14+.
 
 ```bash
 # Compile

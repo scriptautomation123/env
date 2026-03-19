@@ -11,7 +11,7 @@ import javax.swing.SwingUtilities;
  *   java  -cp out openclaw.OpenClawGame
  *
  * Or simply:
- *   java src/main/java/openclaw/OpenClawGame.java   (single-file source launcher, JDK 11+)
+ *   java src/main/java/openclaw/OpenClawGame.java   (single-file source launcher, JDK 14+)
  */
 public class OpenClawGame {
 
