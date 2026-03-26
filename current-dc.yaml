@@ -48,31 +48,35 @@ spec:
               protocol: TCP
               name: https
           env:
-            # ── Spring Boot / Embedded Tomcat TLS (keystore) ──────────
+            - name: JAVA_APP_JAR
+              value: "${JAVA_APP_JAR}"
+            - name: SERVER_SERVLET_CONTEXT_PATH
+              value: "/${CONTEXT_ROOT}"
             - name: SERVER_PORT
               value: "8443"
             - name: SERVER_SSL_ENABLED
               value: "true"
             - name: SERVER_SSL_KEY_STORE
-              value: "file:/opt/eap/standalone/configuration/cert/keystore.p12"
-            - name: SERVER_SSL_KEY_STORE_TYPE
-              value: "PKCS12"
+              value: "/opt/eap/standalone/configuration/cert/sec-${APP}-${PROJ}.apps.${ZONE}.bofa.com.jks"
             - name: SERVER_SSL_KEY_STORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "${APP}-keystore-password"
-                  key: password
+                  key: pkeypass.pwd
+                  name: pkey-secret
+            - name: SERVER_SSL_KEY_STORE_TYPE
+              value: "JKS"
             - name: SERVER_SSL_KEY_ALIAS
-              value: "server"
-            # ── Application ───────────────────────────────────────────
-            - name: SERVER_SERVLET_CONTEXT_PATH
-              value: "/${CONTEXT_ROOT}"
-            - name: SPRING_PROFILES_ACTIVE
-              value: "${ZONE}"
+              value: "tomcat"
             - name: JAVA_TOOL_OPTIONS
               value: >-
-                -XX:MaxRAMPercentage=75.0
-                -Djava.security.egd=file:/dev/./urandom
+                -DCUT_ENCRYPT_KEY_PROP=QGxrByTpxhxWMbnhJvf7ae92qqzvGjh5
+                -Dlog4j.configurationFile=classpath:log4j2-openshift.xml
+                --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED
+                --add-opens=java.management/javax.management=ALL-UNNAMED
+                --add-opens=java.base/java.lang=ALL-UNNAMED
+                --add-opens=java.base/java.io=ALL-UNNAMED
+                --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+                --add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED
           # ── Probes ────────────────────────────────────────────────
           readinessProbe:
             httpGet:
@@ -123,7 +127,8 @@ spec:
       volumes:
         - name: cert-volume
           secret:
-            secretName: "${APP}-keystore"
+            secretName: ${APP}-cert-secret
+            defaultMode: 420
 # ═══════════════════════════════════════════════════════════════════════
 # Parameters
 # ═══════════════════════════════════════════════════════════════════════
@@ -131,6 +136,10 @@ parameters:
   - name: APP
     displayName: "Application Name"
     description: "Unique name to give this instance of the springboot application"
+    required: true
+  - name: JAVA_APP_JAR
+    displayName: "Java App JAR"
+    description: "Name of the Java application JAR file"
     required: true
   - name: REG
     displayName: "Container Registry"
