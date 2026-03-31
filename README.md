@@ -37,6 +37,20 @@ wsl
 ping -c 3 google.com
 ```
 
+## JBoss → Spring Boot Migration Analyzer
+
+The `analyzer/` directory contains an automated analysis tool that scans a
+JBoss / Spring Boot project and reports what needs to be refactored to run as a
+Spring Boot executable WAR on containers with embedded Tomcat.
+
+```bash
+pip install pyyaml
+python analyzer/jboss_migration_analyzer.py /path/to/my-jboss-app --format all
+```
+
+See [`analyzer/README.md`](analyzer/README.md) for full documentation, rule
+catalogue, and CI/CD integration examples.
+
 ## OpenClaw Teaching Kernel
 
 This repository includes an OpenClaw "Workspace-First" kernel configured as a
