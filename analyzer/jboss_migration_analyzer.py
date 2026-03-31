@@ -81,7 +81,7 @@ class AnalysisReport:
     """Top-level analysis result."""
 
     project_dir: str
-    analysed_at: str
+    analyzed_at: str
     total_files_scanned: int = 0
     spring_boot: SpringBootInfo = field(default_factory=SpringBootInfo)
     findings: list[Finding] = field(default_factory=list)
@@ -374,7 +374,7 @@ def build_report(
     all_files = _collect_files(project_dir)
     report = AnalysisReport(
         project_dir=str(project_dir),
-        analysed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        analyzed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         total_files_scanned=len(all_files),
     )
 
@@ -406,7 +406,7 @@ def print_text_report(report: AnalysisReport) -> None:
     print("  JBoss → Spring Boot Embedded Tomcat  ·  Migration Analysis Report")
     print(hr)
     print(f"  Project      : {report.project_dir}")
-    print(f"  Analysed at  : {report.analysed_at}")
+    print(f"  Analyzed at  : {report.analyzed_at}")
     print(f"  Files scanned: {report.total_files_scanned}")
     print()
 
@@ -481,12 +481,12 @@ def write_json_report(report: AnalysisReport, output_path: Path) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Analyse a project for JBoss → Spring Boot embedded Tomcat migration.",
+        description="Analyze a project for JBoss → Spring Boot embedded Tomcat migration.",
     )
     parser.add_argument(
         "project_dir",
         type=Path,
-        help="Path to the project directory to analyse.",
+        help="Path to the project directory to analyze.",
     )
     parser.add_argument(
         "--rules",

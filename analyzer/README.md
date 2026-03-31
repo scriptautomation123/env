@@ -25,7 +25,7 @@ python analyzer/jboss_migration_analyzer.py /path/to/my-jboss-app \
 
 ## What It Detects
 
-The analyzer evaluates ~25 rules across six categories:
+The analyzer evaluates ~25 rules across five categories:
 
 ### 1. JBoss Descriptors (`JBOSS-DESC-*`)
 | Rule | Detects |
@@ -110,7 +110,7 @@ The analyzer evaluates ~25 rules across six categories:
 ```json
 {
   "project_dir": "/path/to/my-jboss-app",
-  "analysed_at": "2026-03-31T02:10:00+00:00",
+  "analyzed_at": "2026-03-31T02:10:00+00:00",
   "total_files_scanned": 247,
   "spring_boot": {
     "version": "3.2.1",
