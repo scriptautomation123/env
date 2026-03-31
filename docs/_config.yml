@@ -1,0 +1,52 @@
+# GitHub Pages Jekyll Configuration
+# Theme: Just the Docs (modern, responsive, professional)
+theme: just-the-docs
+
+title: Principal Engineer Blog
+description: Engineering insights on OpenClaw, OpenShift, and cloud-native architecture
+url: "https://scriptautomation123.github.io/env"
+baseurl: "/env"
+
+# GitHub configuration
+repository: scriptautomation123/env
+github_username: scriptautomation123
+
+# Just the Docs customization
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+permalink: pretty
+
+# Collections for blog posts
+collections:
+  posts:
+    output: true
+    permalink: /blog/:year/:month/:day/:title/
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: post
+      author: Principal Engineer
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-paginate
+  - jemoji
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+
+# Pagination
+paginate: 10
+paginate_path: "/blog/page:num"
+
+# Social
+social:
+  github: scriptautomation123
