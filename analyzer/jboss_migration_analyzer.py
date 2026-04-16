@@ -1,543 +1,364 @@
 #!/usr/bin/env python3
+"""JBoss Migration Analyzer — thin, rule-based scanner with MCP server mode.
+
+Scans a project directory for JBoss-to-Spring-Boot migration issues using
+regex patterns loaded from rules.yaml.  Emits structured JSON output.
+
+Usage (CLI):
+    python jboss_migration_analyzer.py <directory> [--format json|text|all]
+    python jboss_migration_analyzer.py <file> --single-file [--format json|text|all]
+
+Usage (MCP server):
+    python jboss_migration_analyzer.py --mcp-mode
 """
-jboss_migration_analyzer.py — JBoss → Spring Boot Embedded Tomcat Migration Analyzer
-
-Scans a project directory for JBoss EAP artifacts, legacy configuration, and
-source-code patterns that require refactoring to run as a Spring Boot
-executable WAR on containers with embedded Tomcat.
-
-Produces a structured JSON report and a human-readable summary.
-
-Usage:
-    python jboss_migration_analyzer.py <project_dir> [--output report.json] [--format json|text|all]
-
-Example:
-    python jboss_migration_analyzer.py /path/to/my-app --format all
-"""
-
 from __future__ import annotations
 
 import argparse
-import datetime
 import fnmatch
 import json
 import os
 import re
 import sys
-import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
-import yaml
+import yaml  # PyYAML — available in the devcontainer Python feature
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_RULES_FILE = SCRIPT_DIR / "rules.yaml"
-
-SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-SEVERITY_COLOURS = {
-    "critical": "\033[91m",  # red
-    "high": "\033[93m",  # yellow
-    "medium": "\033[33m",  # orange-ish
-    "low": "\033[94m",  # blue
-    "info": "\033[92m",  # green
+RULES_PATH = Path(__file__).parent / "rules.yaml"
+# File extensions worth scanning (skip binaries/images/etc.)
+TEXT_EXTENSIONS = {
+    ".java", ".xml", ".yaml", ".yml", ".properties", ".json",
+    ".sh", ".bat", ".cmd", ".env", ".cfg", ".conf", ".txt",
+    ".gradle", ".kts", ".groovy", ".md",
 }
-RESET = "\033[0m"
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB — skip very large files
+
+# ── Rule Loading ─────────────────────────────────────────────────────────
 
 
-# ── Data classes ─────────────────────────────────────────────────────────────
+def _expand_brace_glob(pattern: str) -> list[str]:
+    """Expand a brace glob pattern into multiple fnmatch patterns.
+
+    Example: "*.{yaml,yml,xml}" → ["*.yaml", "*.yml", "*.xml"]
+    """
+    import re as _re
+    m = _re.search(r"\{([^}]+)\}", pattern)
+    if not m:
+        return [pattern]
+    prefix = pattern[: m.start()]
+    suffix = pattern[m.end() :]
+    return [f"{prefix}{alt.strip()}{suffix}" for alt in m.group(1).split(",") if alt.strip()]
 
 
-@dataclass
-class Finding:
-    """One detected issue."""
-
-    rule_id: str
-    name: str
-    severity: str
-    category: str
-    description: str
-    action: str
-    matched_files: list[str] = field(default_factory=list)
-    matched_lines: list[str] = field(default_factory=list)
-
-
-@dataclass
-class SpringBootInfo:
-    """Detected Spring Boot metadata."""
-
-    version: Optional[str] = None
-    packaging: Optional[str] = None
-    has_servlet_initializer: bool = False
-    has_boot_maven_plugin: bool = False
-    has_actuator: bool = False
-    main_class: Optional[str] = None
+def load_rules(path: Path = RULES_PATH) -> list[dict[str, Any]]:
+    """Load migration rules from YAML and pre-compile regexes."""
+    with open(path, encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    rules = data.get("rules", [])
+    for rule in rules:
+        if "pattern" in rule:
+            rule["_compiled"] = re.compile(rule["pattern"])
+        if "name_pattern" in rule:
+            rule["_name_compiled"] = re.compile(rule["name_pattern"])
+        # Expand file_pattern brace globs into a list for fnmatch
+        # e.g. "*.{yaml,yml,xml}" → ["*.yaml", "*.yml", "*.xml"]
+        fp = rule.get("file_pattern", "*")
+        rule["_file_globs"] = _expand_brace_glob(fp)
+    return rules
 
 
-@dataclass
-class AnalysisReport:
-    """Top-level analysis result."""
-
-    project_dir: str
-    analyzed_at: str
-    total_files_scanned: int = 0
-    spring_boot: SpringBootInfo = field(default_factory=SpringBootInfo)
-    findings: list[Finding] = field(default_factory=list)
-    summary: dict = field(default_factory=dict)
+# ── Scanning ─────────────────────────────────────────────────────────────
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def load_rules(rules_path: Path) -> dict:
-    """Load the YAML rules catalogue."""
-    with open(rules_path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
-def _glob_match(pattern: str, rel_path: str) -> bool:
-    """Check whether *rel_path* matches the glob *pattern*."""
-    # fnmatch doesn't handle ** natively; do a simple two-part check.
-    if "**" in pattern:
-        # Split on ** and check prefix/suffix.
-        parts = pattern.split("**", 1)
-        prefix = parts[0].rstrip("/")
-        suffix = parts[1].lstrip("/")
-        if prefix and not rel_path.startswith(prefix):
-            return False
-        return fnmatch.fnmatch(rel_path, f"*{suffix}") or fnmatch.fnmatch(
-            os.path.basename(rel_path), suffix
-        )
-    return fnmatch.fnmatch(rel_path, pattern)
-
-
-def _collect_files(project_dir: Path) -> list[Path]:
-    """Walk *project_dir* and collect all regular files, skipping VCS dirs."""
-    skip = {".git", ".svn", ".hg", "node_modules", "__pycache__", "target", "build"}
-    result: list[Path] = []
-    for root, dirs, files in os.walk(project_dir):
-        dirs[:] = [d for d in dirs if d not in skip]
-        for f in files:
-            result.append(Path(root) / f)
-    return result
-
-
-def _read_text_safe(path: Path, max_bytes: int = 2 * 1024 * 1024) -> Optional[str]:
-    """Read a text file, returning None for binary / unreadable files."""
-    if path.stat().st_size > max_bytes:
-        return None
+def _should_scan(filepath: Path) -> bool:
+    """Return True if the file is a scannable text file."""
+    if filepath.suffix.lower() not in TEXT_EXTENSIONS:
+        return False
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except (OSError, UnicodeDecodeError):
-        return None
+        if filepath.stat().st_size > MAX_FILE_SIZE:
+            return False
+    except OSError:
+        return False
+    return True
 
 
-# ── Spring Boot metadata extraction ─────────────────────────────────────────
+def _matches_file_glob(filename: str, globs: list[str]) -> bool:
+    """Check if a filename matches any of the given glob patterns."""
+    return any(fnmatch.fnmatch(filename, g) for g in globs)
 
 
-def _detect_spring_boot_version(pom_text: str) -> Optional[str]:
-    """Try to extract the Spring Boot version from a pom.xml."""
-    # Parent version
-    m = re.search(
-        r"<parent>.*?<artifactId>\s*spring-boot-starter-parent\s*</artifactId>"
-        r".*?<version>\s*([^<]+?)\s*</version>",
-        pom_text,
-        re.DOTALL,
-    )
-    if m:
-        return m.group(1).strip()
-    # Property
-    m = re.search(
-        r"<spring-boot\.version>\s*([^<]+?)\s*</spring-boot\.version>", pom_text
-    )
-    if m:
-        return m.group(1).strip()
-    return None
+def scan_file(filepath: Path, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Scan a single file and return findings."""
+    findings: list[dict[str, Any]] = []
+    rel_path = str(filepath)
+    filename = filepath.name
 
+    # Name-pattern rules (match against file path, no need to read contents)
+    for rule in rules:
+        compiled = rule.get("_name_compiled")
+        if compiled and compiled.search(rel_path):
+            findings.append({
+                "rule_id": rule["id"],
+                "category": rule["category"],
+                "severity": rule["severity"],
+                "description": rule["description"],
+                "file": rel_path,
+                "line": 0,
+                "snippet": f"(file name match: {filename})",
+            })
 
-def _detect_packaging(pom_text: str) -> Optional[str]:
-    m = re.search(r"<packaging>\s*(\w+)\s*</packaging>", pom_text)
-    return m.group(1).strip() if m else "jar"  # Maven default
+    # Content-pattern rules
+    content_rules = [r for r in rules if "_compiled" in r]
+    if not content_rules or not _should_scan(filepath):
+        return findings
 
+    try:
+        lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return findings
 
-def _enrich_spring_boot_info(
-    info: SpringBootInfo, all_files: list[Path], project_dir: Path
-) -> None:
-    """Populate SpringBootInfo by scanning key files."""
-    for fp in all_files:
-        rel = str(fp.relative_to(project_dir))
-        basename = fp.name
-
-        # pom.xml
-        if basename == "pom.xml":
-            text = _read_text_safe(fp)
-            if text:
-                if info.version is None:
-                    info.version = _detect_spring_boot_version(text)
-                if info.packaging is None:
-                    info.packaging = _detect_packaging(text)
-                if "spring-boot-maven-plugin" in text:
-                    info.has_boot_maven_plugin = True
-                if "spring-boot-starter-actuator" in text:
-                    info.has_actuator = True
-
-        # build.gradle / build.gradle.kts
-        if basename in ("build.gradle", "build.gradle.kts"):
-            text = _read_text_safe(fp)
-            if text:
-                m = re.search(
-                    r"org\.springframework\.boot['\"]?\s*version\s*['\"]?([^'\")\s]+)",
-                    text,
-                )
-                if m and info.version is None:
-                    info.version = m.group(1).strip()
-                if "spring-boot-starter-actuator" in text:
-                    info.has_actuator = True
-
-        # Java sources
-        if basename.endswith(".java"):
-            text = _read_text_safe(fp)
-            if text:
-                if "extends SpringBootServletInitializer" in text:
-                    info.has_servlet_initializer = True
-                if "@SpringBootApplication" in text:
-                    info.main_class = rel
-
-
-# ── Rule evaluation engine ───────────────────────────────────────────────────
-
-
-def _evaluate_file_glob_rule(
-    rule: dict,
-    all_files: list[Path],
-    project_dir: Path,
-) -> tuple[list[str], list[str]]:
-    """Return (matched_files, matched_lines) for a single rule."""
-    globs = rule.get("file_glob", [])
-    contains = rule.get("file_contains")
-    negate = rule.get("negate", False)
-
-    if isinstance(contains, str):
-        contains = [contains]
-
-    matched_files: list[str] = []
-    matched_lines: list[str] = []
-
-    for fp in all_files:
-        rel = str(fp.relative_to(project_dir))
-
-        # Check glob
-        glob_hit = any(_glob_match(g, rel) for g in globs)
-        if not glob_hit:
-            continue
-
-        if contains is None:
-            # Rule is purely a file-existence check
-            if not negate:
-                matched_files.append(rel)
-            continue
-
-        # File content check
-        text = _read_text_safe(fp)
-        if text is None:
-            continue
-
-        found_any = False
-        for pattern in contains:
-            for line_no, line in enumerate(text.splitlines(), 1):
-                if re.search(pattern, line):
-                    found_any = True
-                    matched_lines.append(f"{rel}:{line_no}: {line.strip()}")
-
-        if negate:
-            if not found_any:
-                matched_files.append(rel)
-        else:
-            if found_any:
-                matched_files.append(rel)
-
-    return matched_files, matched_lines
-
-
-def _evaluate_pom_dependency_rule(
-    rule: dict,
-    all_files: list[Path],
-    project_dir: Path,
-) -> tuple[list[str], list[str]]:
-    """Check for Maven dependencies matching groupId:artifactId patterns."""
-    patterns = rule.get("pom_dependency", [])
-    matched_files: list[str] = []
-    matched_lines: list[str] = []
-
-    for fp in all_files:
-        if fp.name != "pom.xml":
-            continue
-        rel = str(fp.relative_to(project_dir))
-        text = _read_text_safe(fp)
-        if text is None:
-            continue
-
-        for pat in patterns:
-            group_pat, art_pat = pat.split(":", 1)
-            # Simple regex approach (handles namespaces loosely)
-            dep_re = re.compile(
-                r"<dependency>.*?"
-                r"<groupId>\s*("
-                + re.escape(group_pat).replace(r"\*", r"[^<]*")
-                + r")\s*</groupId>.*?"
-                r"<artifactId>\s*("
-                + re.escape(art_pat).replace(r"\*", r"[^<]*")
-                + r")\s*</artifactId>",
-                re.DOTALL,
-            )
-            for m in dep_re.finditer(text):
-                dep_str = f"{m.group(1)}:{m.group(2)}"
-                matched_lines.append(f"{rel}: dependency {dep_str}")
-                if rel not in matched_files:
-                    matched_files.append(rel)
-
-    return matched_files, matched_lines
-
-
-def evaluate_rules(
-    rules: dict,
-    all_files: list[Path],
-    project_dir: Path,
-) -> list[Finding]:
-    """Evaluate every rule category and return findings."""
-    findings: list[Finding] = []
-
-    for category, rule_list in rules.items():
-        if not isinstance(rule_list, list):
-            continue
-        for rule in rule_list:
-            # Choose evaluator
-            if "pom_dependency" in rule:
-                mf, ml = _evaluate_pom_dependency_rule(rule, all_files, project_dir)
-            elif "file_glob" in rule:
-                mf, ml = _evaluate_file_glob_rule(rule, all_files, project_dir)
-            else:
+    for line_num, line_text in enumerate(lines, start=1):
+        for rule in content_rules:
+            if not _matches_file_glob(filename, rule["_file_globs"]):
                 continue
+            match = rule["_compiled"].search(line_text)
+            if match:
+                findings.append({
+                    "rule_id": rule["id"],
+                    "category": rule["category"],
+                    "severity": rule["severity"],
+                    "description": rule["description"],
+                    "file": rel_path,
+                    "line": line_num,
+                    "snippet": line_text.strip()[:200],
+                })
 
-            negate = rule.get("negate", False)
-
-            # For negate rules that check file content, the rule fires if
-            # *no* matching file contained the pattern.  We detect this as
-            # mf being populated with glob-matching files that lacked the pattern.
-            if negate and rule.get("file_contains") and not mf:
-                # Negate rule didn't fire — all matching files contained the
-                # pattern, so no finding.
-                continue
-
-            if mf or ml:
-                findings.append(
-                    Finding(
-                        rule_id=rule["id"],
-                        name=rule["name"],
-                        severity=rule["severity"],
-                        category=category,
-                        description=rule.get("description", "").strip(),
-                        action=rule.get("action", "").strip(),
-                        matched_files=mf,
-                        matched_lines=ml[:20],  # cap for readability
-                    )
-                )
-
-    # Sort by severity
-    findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
     return findings
 
 
-# ── Report builders ──────────────────────────────────────────────────────────
+def scan_project(root: str | Path, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Walk a directory tree and scan all text files."""
+    root = Path(root)
+    findings: list[dict[str, Any]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Skip hidden dirs and common non-source dirs
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".")
+            and d not in {
+                "node_modules", "target", "build", "__pycache__", ".git",
+                "dist", "out", "bin", ".gradle", ".mvn", "vendor",
+            }
+        ]
+        for fname in filenames:
+            fpath = Path(dirpath) / fname
+            findings.extend(scan_file(fpath, rules))
+    return findings
 
 
-def _build_summary(findings: list[Finding]) -> dict:
-    """Build a severity-count summary dict."""
-    counts: dict[str, int] = {}
+def check_deployment_config(filepath: str | Path, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Scan a single deployment YAML for JBoss vestiges."""
+    return scan_file(Path(filepath), rules)
+
+
+# ── Output Formatting ────────────────────────────────────────────────────
+
+SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _sort_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(findings, key=lambda f: SEVERITY_ORDER.get(f["severity"], 99))
+
+
+def format_json(findings: list[dict[str, Any]]) -> str:
+    return json.dumps({"total": len(findings), "findings": _sort_findings(findings)}, indent=2)
+
+
+def format_text(findings: list[dict[str, Any]]) -> str:
+    if not findings:
+        return "No JBoss migration issues found."
+    lines = [f"Found {len(findings)} migration issue(s):\n"]
+    for f in _sort_findings(findings):
+        loc = f"{f['file']}:{f['line']}" if f["line"] else f["file"]
+        lines.append(f"  [{f['severity'].upper():8s}] {f['rule_id']:16s} {loc}")
+        lines.append(f"             {f['description']}")
+        if f.get("snippet") and not f["snippet"].startswith("(file name"):
+            lines.append(f"             > {f['snippet']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_summary(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Produce a summary grouped by category and severity."""
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    by_severity: dict[str, int] = {}
     for f in findings:
-        counts[f.severity] = counts.get(f.severity, 0) + 1
+        by_category.setdefault(f["category"], []).append(f)
+        by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
     return {
-        "total_findings": len(findings),
-        "by_severity": counts,
-        "migration_ready": counts.get("critical", 0) == 0
-        and counts.get("high", 0) == 0,
+        "total": len(findings),
+        "by_severity": by_severity,
+        "by_category": {k: len(v) for k, v in by_category.items()},
     }
 
 
-def build_report(
-    project_dir: Path,
-    rules: dict,
-) -> AnalysisReport:
-    """Run the full analysis and return a structured report."""
-    all_files = _collect_files(project_dir)
-    report = AnalysisReport(
-        project_dir=str(project_dir),
-        analyzed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        total_files_scanned=len(all_files),
-    )
-
-    # Enrich Spring Boot info
-    _enrich_spring_boot_info(report.spring_boot, all_files, project_dir)
-
-    # Evaluate rules
-    report.findings = evaluate_rules(rules, all_files, project_dir)
-    report.summary = _build_summary(report.findings)
-
-    return report
+# ── MCP Server Mode ─────────────────────────────────────────────────────
 
 
-# ── Output formatters ────────────────────────────────────────────────────────
+def _mcp_response(req_id: Any, result: Any) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _sev_label(severity: str, colour: bool = True) -> str:
-    if colour and sys.stdout.isatty():
-        return f"{SEVERITY_COLOURS.get(severity, '')}{severity.upper()}{RESET}"
-    return severity.upper()
+def _mcp_error(req_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-def print_text_report(report: AnalysisReport) -> None:
-    """Print a human-readable report to stdout."""
-    colour = sys.stdout.isatty()
-    hr = "=" * 72
+def run_mcp_server() -> None:
+    """Run as a JSON-RPC stdio MCP server."""
+    rules = load_rules()
+    tool_defs = [
+        {
+            "name": "scan_project",
+            "description": "Scan a project directory for JBoss migration issues. Returns structured findings sorted by severity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute or relative path to the project directory to scan"},
+                },
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "scan_file",
+            "description": "Scan a single file for JBoss migration issues.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file to scan"},
+                },
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "list_rules",
+            "description": "List all migration detection rules with their IDs, categories, severities, and descriptions.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "check_deployment_config",
+            "description": "Scan an OpenShift/Kubernetes deployment YAML for JBoss vestiges (legacy paths, keystore refs, EAP flags).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the deployment YAML file"},
+                },
+                "required": ["path"],
+            },
+        },
+    ]
 
-    print(hr)
-    print("  JBoss → Spring Boot Embedded Tomcat  ·  Migration Analysis Report")
-    print(hr)
-    print(f"  Project      : {report.project_dir}")
-    print(f"  Analyzed at  : {report.analyzed_at}")
-    print(f"  Files scanned: {report.total_files_scanned}")
-    print()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-    # Spring Boot info
-    sb = report.spring_boot
-    print("  ── Spring Boot Detection ──")
-    print(f"  Version              : {sb.version or 'not detected'}")
-    print(f"  Packaging            : {sb.packaging or 'not detected'}")
-    print(f"  ServletInitializer   : {'yes' if sb.has_servlet_initializer else 'NO'}")
-    print(f"  Boot Maven Plugin    : {'yes' if sb.has_boot_maven_plugin else 'NO'}")
-    print(f"  Actuator             : {'yes' if sb.has_actuator else 'NO'}")
-    print(f"  Main class           : {sb.main_class or 'not detected'}")
-    print()
+        req_id = msg.get("id")
+        method = msg.get("method", "")
+        params = msg.get("params", {})
 
-    # Summary
-    s = report.summary
-    print("  ── Summary ──")
-    print(f"  Total findings       : {s['total_findings']}")
-    for sev in ("critical", "high", "medium", "low", "info"):
-        count = s.get("by_severity", {}).get(sev, 0)
-        if count:
-            print(f"    {_sev_label(sev, colour):>20s} : {count}")
-    ready = s.get("migration_ready", False)
-    status = (
-        "✅  READY (no critical/high issues)"
-        if ready
-        else "❌  NOT READY (critical/high issues remain)"
-    )
-    print(f"  Migration readiness  : {status}")
-    print()
+        if method == "initialize":
+            resp = _mcp_response(req_id, {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "jboss-migration-analyzer", "version": "1.0.0"},
+            })
+        elif method == "notifications/initialized":
+            continue  # no response needed for notifications
+        elif method == "tools/list":
+            resp = _mcp_response(req_id, {"tools": tool_defs})
+        elif method == "tools/call":
+            tool_name = params.get("name", "")
+            tool_args = params.get("arguments", {})
+            try:
+                if tool_name == "scan_project":
+                    target = tool_args.get("path", ".")
+                    findings = scan_project(target, rules)
+                    result_text = format_json(findings)
+                elif tool_name == "scan_file":
+                    target = tool_args.get("path", "")
+                    findings = scan_file(Path(target), rules)
+                    result_text = format_json(findings)
+                elif tool_name == "list_rules":
+                    rule_list = [
+                        {"id": r["id"], "category": r["category"], "severity": r["severity"], "description": r["description"]}
+                        for r in rules
+                    ]
+                    result_text = json.dumps(rule_list, indent=2)
+                elif tool_name == "check_deployment_config":
+                    target = tool_args.get("path", "")
+                    findings = check_deployment_config(target, rules)
+                    result_text = format_json(findings)
+                else:
+                    resp = _mcp_error(req_id, -32601, f"Unknown tool: {tool_name}")
+                    sys.stdout.write(json.dumps(resp) + "\n")
+                    sys.stdout.flush()
+                    continue
+                resp = _mcp_response(req_id, {
+                    "content": [{"type": "text", "text": result_text}],
+                })
+            except Exception as exc:
+                resp = _mcp_error(req_id, -32000, str(exc))
+        else:
+            resp = _mcp_error(req_id, -32601, f"Method not found: {method}")
 
-    # Detailed findings
-    if report.findings:
-        print(hr)
-        print("  ── Detailed Findings ──")
-        print(hr)
-        for i, f in enumerate(report.findings, 1):
-            print()
-            print(f"  [{i}] {_sev_label(f.severity, colour)}  {f.rule_id} — {f.name}")
-            print(f"      Category   : {f.category}")
-            print(f"      Description: {f.description}")
-            if f.matched_files:
-                print(f"      Files      : {', '.join(f.matched_files[:5])}")
-                if len(f.matched_files) > 5:
-                    print(f"                   … and {len(f.matched_files) - 5} more")
-            if f.matched_lines:
-                print("      Evidence   :")
-                for line in f.matched_lines[:5]:
-                    print(f"        → {line}")
-                if len(f.matched_lines) > 5:
-                    print(
-                        f"        … and {len(f.matched_lines) - 5} more matches"
-                    )
-            print(f"      Action     : {f.action}")
-
-    print()
-    print(hr)
-    print("  End of report")
-    print(hr)
+        sys.stdout.write(json.dumps(resp) + "\n")
+        sys.stdout.flush()
 
 
-def write_json_report(report: AnalysisReport, output_path: Path) -> None:
-    """Write the report as JSON."""
-    data = asdict(report)
-    with open(output_path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, default=str)
-    print(f"JSON report written to {output_path}")
+# ── CLI Entry Point ──────────────────────────────────────────────────────
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze a project for JBoss → Spring Boot embedded Tomcat migration.",
+        description="Scan a project for JBoss-to-Spring-Boot migration issues."
     )
-    parser.add_argument(
-        "project_dir",
-        type=Path,
-        help="Path to the project directory to analyze.",
-    )
-    parser.add_argument(
-        "--rules",
-        type=Path,
-        default=DEFAULT_RULES_FILE,
-        help="Path to the YAML rules file (default: rules.yaml next to this script).",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=Path,
-        default=None,
-        help="Path for JSON output file.",
-    )
-    parser.add_argument(
-        "--format",
-        "-f",
-        choices=["json", "text", "all"],
-        default="text",
-        help="Output format (default: text).",
-    )
-    return parser.parse_args(argv)
+    parser.add_argument("path", nargs="?", default=".", help="Directory or file to scan")
+    parser.add_argument("--format", choices=["json", "text", "all"], default="text",
+                        help="Output format (default: text)")
+    parser.add_argument("--single-file", action="store_true",
+                        help="Scan a single file instead of a directory")
+    parser.add_argument("--mcp-mode", action="store_true",
+                        help="Run as an MCP stdio server for Copilot integration")
+    args = parser.parse_args()
 
+    if args.mcp_mode:
+        run_mcp_server()
+        return
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+    rules = load_rules()
 
-    project_dir = args.project_dir.resolve()
-    if not project_dir.is_dir():
-        print(f"Error: {project_dir} is not a directory.", file=sys.stderr)
-        return 1
+    if args.single_file:
+        findings = scan_file(Path(args.path), rules)
+    else:
+        findings = scan_project(args.path, rules)
 
-    rules_path = args.rules.resolve()
-    if not rules_path.is_file():
-        print(f"Error: rules file not found: {rules_path}", file=sys.stderr)
-        return 1
-
-    rules = load_rules(rules_path)
-    report = build_report(project_dir, rules)
-
-    fmt = args.format
-    if fmt in ("text", "all"):
-        print_text_report(report)
-
-    if fmt in ("json", "all"):
-        out = args.output or Path("migration-analysis.json")
-        write_json_report(report, out)
-
-    # Exit code reflects migration readiness
-    return 0 if report.summary.get("migration_ready", False) else 2
+    if args.format == "json":
+        print(format_json(findings))
+    elif args.format == "text":
+        print(format_text(findings))
+    else:  # "all"
+        print(format_text(findings))
+        print("\n--- JSON ---\n")
+        print(format_json(findings))
+        print("\n--- Summary ---\n")
+        print(json.dumps(format_summary(findings), indent=2))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
