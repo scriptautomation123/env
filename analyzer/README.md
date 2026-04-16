@@ -53,13 +53,13 @@ pre-installed in the devcontainer.
 
 | Layer | Artifact | Type | Effort | Repeatability |
 |-------|----------|------|--------|---------------|
-| 1 | `analyzer/jboss_migration_analyzer.py` + `rules.yaml` | Code (thin, rule-based) | Medium (one-time) | 100 % deterministic |
+| 1 | `analyzer/jboss_migration_analyzer.py` + `rules.yaml` | Code (thin, rule-based) | Medium (one-time) | 100% deterministic |
 | 2 | `.vscode/mcp.json` | Config | Low | Automatic |
 | 3 | `.github/copilot-instructions.md` | Instructions | Low | Consistent AI behavior |
 | 4 | `.github/prompts/*.prompt.md` | Prompt templates | Low | Reusable workflows |
 | 5 | Copilot's AI reasoning | Zero code | Zero | Adaptive per project |
 
-The key insight: **~200 lines of Python + ~5 config/markdown files**. Everything
+The key insight: **a single Python scanner + ~5 config/markdown files**. Everything
 else is Copilot applying its reasoning to structured scanner data. The scanner
 handles "repeatable pattern matching"; the AI handles "this looks like a
 JBoss-ism the rules didn't cover."
