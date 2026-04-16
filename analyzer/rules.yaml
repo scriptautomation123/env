@@ -21,7 +21,7 @@ rules:
     severity: critical
     description: "JKS/PKCS12 keystore type — migrate to Spring Boot 3.1+ PEM certificate support"
     file_pattern: "*.{yaml,yml,properties,xml}"
-    pattern: "(?i)(key[_-]?store[_-]?type|SERVER_SSL_KEY_STORE_TYPE)\\s*[=:]\\s*[\"']?(JKS|PKCS12)|value:\\s*[\"']?(JKS|PKCS12)[\"']?\\s*$"
+    pattern: "(?i)(?:(?:key[_-]?store[_-]?type|SERVER_SSL_KEY_STORE_TYPE)\\s*[=:]|value:\\s*)[\"']?(?:JKS|PKCS12)[\"']?\\s*$"
 
   - id: JBOSS-TLS-002
     category: tls_ssl

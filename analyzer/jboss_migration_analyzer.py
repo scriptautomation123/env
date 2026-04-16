@@ -38,6 +38,20 @@ MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB — skip very large files
 # ── Rule Loading ─────────────────────────────────────────────────────────
 
 
+def _expand_brace_glob(pattern: str) -> list[str]:
+    """Expand a brace glob pattern into multiple fnmatch patterns.
+
+    Example: "*.{yaml,yml,xml}" → ["*.yaml", "*.yml", "*.xml"]
+    """
+    import re as _re
+    m = _re.search(r"\{([^}]+)\}", pattern)
+    if not m:
+        return [pattern]
+    prefix = pattern[: m.start()]
+    suffix = pattern[m.end() :]
+    return [f"{prefix}{alt.strip()}{suffix}" for alt in m.group(1).split(",") if alt.strip()]
+
+
 def load_rules(path: Path = RULES_PATH) -> list[dict[str, Any]]:
     """Load migration rules from YAML and pre-compile regexes."""
     with open(path, encoding="utf-8") as fh:
@@ -48,9 +62,10 @@ def load_rules(path: Path = RULES_PATH) -> list[dict[str, Any]]:
             rule["_compiled"] = re.compile(rule["pattern"])
         if "name_pattern" in rule:
             rule["_name_compiled"] = re.compile(rule["name_pattern"])
-        # Expand file_pattern globs into a list for fnmatch
+        # Expand file_pattern brace globs into a list for fnmatch
+        # e.g. "*.{yaml,yml,xml}" → ["*.yaml", "*.yml", "*.xml"]
         fp = rule.get("file_pattern", "*")
-        rule["_file_globs"] = [g.strip() for g in fp.replace("{", "").replace("}", ",").split(",") if g.strip()] if "{" in fp else [fp]
+        rule["_file_globs"] = _expand_brace_glob(fp)
     return rules
 
 
@@ -100,7 +115,7 @@ def scan_file(filepath: Path, rules: list[dict[str, Any]]) -> list[dict[str, Any
         return findings
 
     try:
-        lines = filepath.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
         return findings
 
@@ -131,7 +146,11 @@ def scan_project(root: str | Path, rules: list[dict[str, Any]]) -> list[dict[str
         # Skip hidden dirs and common non-source dirs
         dirnames[:] = [
             d for d in dirnames
-            if not d.startswith(".") and d not in {"node_modules", "target", "build", "__pycache__", ".git"}
+            if not d.startswith(".")
+            and d not in {
+                "node_modules", "target", "build", "__pycache__", ".git",
+                "dist", "out", "bin", ".gradle", ".mvn", "vendor",
+            }
         ]
         for fname in filenames:
             fpath = Path(dirpath) / fname
