@@ -1,0 +1,103 @@
+---
+layout: default
+---
+
+<article class="post">
+  <!-- Post Header -->
+  <header class="post-header">
+    <div class="post-header-container">
+      <div class="post-meta-top">
+        <div class="post-categories">
+          {% for category in page.categories %}
+          <span class="tag tag-{{ category | slugify }}">{{ category }}</span>
+          {% endfor %}
+        </div>
+        <time class="post-date" datetime="{{ page.date | date_to_xmlschema }}">
+          {{ page.date | date: "%B %d, %Y" }}
+        </time>
+      </div>
+      <h1 class="post-title animate-fade-in-up">{{ page.title }}</h1>
+      {% if page.excerpt %}
+      <p class="post-excerpt animate-fade-in-up delay-1">{{ page.excerpt | strip_html }}</p>
+      {% endif %}
+      <div class="post-meta-bottom animate-fade-in-up delay-2">
+        <div class="post-author">
+          <div class="author-avatar">PE</div>
+          <div class="author-info">
+            <span class="author-name">{{ page.author | default: "Principal Engineer" }}</span>
+            <span class="author-role">Engineering Blog</span>
+          </div>
+        </div>
+        <div class="post-reading-info">
+          <span class="reading-time" id="readingTime"></span>
+          {% if page.tags.size > 0 %}
+          <span class="post-tags-inline">
+            {% for tag in page.tags %}
+            <span class="tag-pill">{{ tag }}</span>
+            {% endfor %}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Post Body -->
+  <div class="post-body-wrapper">
+    <div class="post-body-container">
+      <!-- Table of Contents (sidebar) -->
+      <aside class="post-toc" id="postToc">
+        <div class="toc-sticky">
+          <h4 class="toc-title">On this page</h4>
+          <nav class="toc-nav" id="tocNav">
+            <!-- Populated by JS -->
+          </nav>
+        </div>
+      </aside>
+
+      <!-- Post Content -->
+      <div class="post-content" id="postContent">
+        {{ content }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Post Footer -->
+  <footer class="post-footer">
+    <div class="post-footer-container">
+      <!-- Post Navigation -->
+      <nav class="post-navigation">
+        {% if page.previous.url %}
+        <a href="{{ page.previous.url | relative_url }}" class="post-nav-link post-nav-prev">
+          <span class="post-nav-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Previous Article
+          </span>
+          <span class="post-nav-title">{{ page.previous.title | truncatewords: 8 }}</span>
+        </a>
+        {% else %}
+        <div></div>
+        {% endif %}
+        {% if page.next.url %}
+        <a href="{{ page.next.url | relative_url }}" class="post-nav-link post-nav-next">
+          <span class="post-nav-label">
+            Next Article
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </span>
+          <span class="post-nav-title">{{ page.next.title | truncatewords: 8 }}</span>
+        </a>
+        {% else %}
+        <div></div>
+        {% endif %}
+      </nav>
+
+      <!-- Back to Blog -->
+      <div class="post-back">
+        <a href="{{ '/blog/' | relative_url }}" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Back to All Articles
+        </a>
+      </div>
+    </div>
+  </footer>
+</article>
