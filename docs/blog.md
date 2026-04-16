@@ -10,12 +10,12 @@ has_children: false
 ## All Posts
 
 {% for post in site.posts %}
-### [{{ post.title }}]({{ post.url }})
+### [{{ post.title }}]({{ post.url | relative_url }})
 *{{ post.date | date: "%B %d, %Y" }}*
 
 {{ post.excerpt | strip_html }}
 
-[Read more →]({{ post.url }})
+[Read more →]({{ post.url | relative_url }})
 
 ---
 
