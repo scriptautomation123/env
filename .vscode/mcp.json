@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "jboss-migration": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${workspaceFolder}/analyzer/jboss_migration_analyzer.py", "--mcp-mode"],
+      "description": "Scans a project for JBoss-to-Spring-Boot migration issues using rule-based pattern matching"
+    }
+  }
+}

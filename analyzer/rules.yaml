@@ -1,0 +1,228 @@
+# rules.yaml — JBoss-to-Spring-Boot Migration Detection Rules
+#
+# Each rule defines a regex pattern to match against file contents or file names.
+# The analyzer loads these at startup so you can add patterns without touching Python.
+#
+# Fields:
+#   id:          Unique rule identifier (e.g., JBOSS-TLS-001)
+#   category:    One of: tls_ssl, jndi, deployment_descriptors, classloading, logging, configuration
+#   severity:    One of: critical, high, medium, low, info
+#   description: Short human-readable explanation of the finding
+#   file_pattern: Glob pattern restricting which files this rule applies to (optional, default: "*")
+#   pattern:     Python regex applied to file contents (mutually exclusive with name_pattern)
+#   name_pattern: Python regex applied to file names/paths (mutually exclusive with pattern)
+
+rules:
+  # ═══════════════════════════════════════════════════════════════════════
+  # TLS / SSL
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-TLS-001
+    category: tls_ssl
+    severity: critical
+    description: "JKS/PKCS12 keystore type — migrate to Spring Boot 3.1+ PEM certificate support"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "(?i)(key[_-]?store[_-]?type|SERVER_SSL_KEY_STORE_TYPE)\\s*[=:]\\s*[\"']?(JKS|PKCS12)|value:\\s*[\"']?(JKS|PKCS12)[\"']?\\s*$"
+
+  - id: JBOSS-TLS-002
+    category: tls_ssl
+    severity: critical
+    description: "Keystore file path detected — replace with server.ssl.certificate PEM path"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "(?i)\\.(?:jks|p12|pfx|keystore)[\"']?\\s*$"
+
+  - id: JBOSS-TLS-003
+    category: tls_ssl
+    severity: high
+    description: "Keystore password reference — PEM certs eliminate the need for keystore passwords"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "(?i)(key[_-]?store[_-]?password|SERVER_SSL_KEY_STORE_PASSWORD)"
+
+  - id: JBOSS-TLS-004
+    category: tls_ssl
+    severity: high
+    description: "Legacy JBoss EAP certificate mount path (/opt/eap/) — use /etc/tls/private instead"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "/opt/eap/standalone/configuration/cert"
+
+  - id: JBOSS-TLS-005
+    category: tls_ssl
+    severity: medium
+    description: "SSL key alias 'tomcat' — not needed with PEM certificate configuration"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "(?i)(key[_-]?alias|SERVER_SSL_KEY_ALIAS)\\s*[=:]\\s*[\"']?tomcat"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # JNDI
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-JNDI-001
+    category: jndi
+    severity: critical
+    description: "JNDI lookup detected — replace with Spring @Bean or application.yml datasource config"
+    file_pattern: "*.{java,xml,properties,yaml,yml}"
+    pattern: "(?i)(InitialContext|new\\s+InitialContext|Context\\.lookup|jndi[_-]?name)"
+
+  - id: JBOSS-JNDI-002
+    category: jndi
+    severity: high
+    description: "JBoss-specific JNDI prefix (java:jboss/) — use Spring Boot auto-configuration"
+    file_pattern: "*.{java,xml,properties,yaml,yml}"
+    pattern: "java:jboss/"
+
+  - id: JBOSS-JNDI-003
+    category: jndi
+    severity: high
+    description: "JBoss datasource JNDI binding — migrate to spring.datasource.* properties"
+    file_pattern: "*.{xml,properties,yaml,yml}"
+    pattern: "(?i)(jndi-name|jndi\\.name)\\s*[=:].*datasource"
+
+  - id: JBOSS-JNDI-004
+    category: jndi
+    severity: medium
+    description: "JBoss JMS/messaging JNDI reference — migrate to Spring JMS or Spring AMQP"
+    file_pattern: "*.{java,xml,properties,yaml,yml}"
+    pattern: "(?i)(java:/jms/|java:jboss/exported/jms/|ConnectionFactory.*jndi)"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Deployment Descriptors
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-DD-001
+    category: deployment_descriptors
+    severity: critical
+    description: "jboss-web.xml found — migrate settings to application.yml / application.properties"
+    name_pattern: "jboss-web\\.xml$"
+
+  - id: JBOSS-DD-002
+    category: deployment_descriptors
+    severity: critical
+    description: "jboss-deployment-structure.xml found — review module dependencies for Spring Boot equivalents"
+    name_pattern: "jboss-deployment-structure\\.xml$"
+
+  - id: JBOSS-DD-003
+    category: deployment_descriptors
+    severity: high
+    description: "standalone.xml reference — externalize config to Spring Boot application.yml"
+    file_pattern: "*.{xml,properties,yaml,yml,sh}"
+    pattern: "(?i)standalone(-full|-ha|-full-ha)?\\.xml"
+
+  - id: JBOSS-DD-004
+    category: deployment_descriptors
+    severity: high
+    description: "JBoss CLI script detected — replace with Spring Boot Actuator or application config"
+    name_pattern: "(?i)jboss[_-]?cli.*\\.(sh|bat|cli)$"
+
+  - id: JBOSS-DD-005
+    category: deployment_descriptors
+    severity: medium
+    description: "persistence.xml with JBoss/Hibernate dialect — verify Spring Boot auto-configuration handles this"
+    file_pattern: "persistence.xml"
+    pattern: "(?i)(jboss\\.as\\.jpa|hibernate\\.dialect.*org\\.hibernate)"
+
+  - id: JBOSS-DD-006
+    category: deployment_descriptors
+    severity: medium
+    description: "EJB descriptor (ejb-jar.xml) found — migrate to Spring @Service / @Component beans"
+    name_pattern: "ejb-jar\\.xml$"
+
+  - id: JBOSS-DD-007
+    category: deployment_descriptors
+    severity: medium
+    description: "web.xml found — most settings can move to Spring Boot auto-configuration"
+    name_pattern: "WEB-INF/web\\.xml$"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Classloading & Modules
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-CL-001
+    category: classloading
+    severity: high
+    description: "JBoss Modules module.xml found — dependencies must move to Maven/Gradle"
+    name_pattern: "module\\.xml$"
+
+  - id: JBOSS-CL-002
+    category: classloading
+    severity: high
+    description: "--add-opens JVM flags for JBoss module access — review necessity for Spring Boot"
+    file_pattern: "*.{yaml,yml,properties,sh,bat,env}"
+    pattern: "--add-opens=(jdk\\.management|java\\.management|java\\.base|java\\.rmi)"
+
+  - id: JBOSS-CL-003
+    category: classloading
+    severity: medium
+    description: "JBoss VFS (Virtual File System) usage — Spring Boot uses standard classpath"
+    file_pattern: "*.{java,xml}"
+    pattern: "(?i)(org\\.jboss\\.vfs|jboss\\.vfs|VFSUtils)"
+
+  - id: JBOSS-CL-004
+    category: classloading
+    severity: medium
+    description: "JBoss Modules API usage — replace with standard classpath dependencies"
+    file_pattern: "*.java"
+    pattern: "(?i)(org\\.jboss\\.modules|ModuleClassLoader|Module\\.getCallerModule)"
+
+  - id: JBOSS-CL-005
+    category: classloading
+    severity: low
+    description: "Explicit Undertow reference — Spring Boot embedded Tomcat is the default; verify compatibility"
+    file_pattern: "*.{java,xml,properties,yaml,yml}"
+    pattern: "(?i)(io\\.undertow|undertow\\.)"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Logging
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-LOG-001
+    category: logging
+    severity: medium
+    description: "JBoss Logging API usage — migrate to SLF4J (Spring Boot default)"
+    file_pattern: "*.java"
+    pattern: "(?i)(org\\.jboss\\.logging|JBossLog)"
+
+  - id: JBOSS-LOG-002
+    category: logging
+    severity: medium
+    description: "Log4j configuration for OpenShift/JBoss — Spring Boot uses Logback by default"
+    file_pattern: "*.{yaml,yml,properties,xml}"
+    pattern: "(?i)log4j2?[_-](openshift|jboss)\\.xml"
+
+  - id: JBOSS-LOG-003
+    category: logging
+    severity: low
+    description: "logging.properties found — Spring Boot uses logback-spring.xml or application.yml logging config"
+    name_pattern: "logging\\.properties$"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Configuration / General
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: JBOSS-CFG-001
+    category: configuration
+    severity: high
+    description: "JBoss EAP system property pattern — externalize to Spring Boot application.yml"
+    file_pattern: "*.{yaml,yml,properties,xml,sh}"
+    pattern: "(?i)(-Djboss\\.|jboss\\.home|JBOSS_HOME)"
+
+  - id: JBOSS-CFG-002
+    category: configuration
+    severity: medium
+    description: "Valve or filter in JBoss-specific XML — migrate to Spring Boot Filter @Bean"
+    file_pattern: "*.xml"
+    pattern: "(?i)(<valve|org\\.apache\\.catalina\\.valves|jboss\\.web\\.valve)"
+
+  - id: JBOSS-CFG-003
+    category: configuration
+    severity: medium
+    description: "JBoss security domain reference — migrate to Spring Security configuration"
+    file_pattern: "*.{java,xml,properties,yaml,yml}"
+    pattern: "(?i)(security-domain|<security-domain|@SecurityDomain)"
+
+  - id: JBOSS-CFG-004
+    category: configuration
+    severity: info
+    description: "JAVA_APP_JAR env var — may be a JBoss/s2i convention; Spring Boot uses executable JARs directly"
+    file_pattern: "*.{yaml,yml,properties,sh}"
+    pattern: "JAVA_APP_JAR"
+
+  - id: JBOSS-CFG-005
+    category: configuration
+    severity: high
+    description: "EAP-specific annotation detected — verify Spring Boot equivalent exists"
+    file_pattern: "*.java"
+    pattern: "(?i)(@org\\.jboss\\.|@javax\\.ejb\\.|@jakarta\\.ejb\\.)"
