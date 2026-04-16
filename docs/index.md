@@ -15,7 +15,7 @@ Hosted on GitHub Pages with Jekyll.
 ## Recent Articles
 
 {% for post in site.posts limit:5 %}
-- **[{{ post.title }}]({{ post.url }})** — {{ post.date | date: "%B %d, %Y" }}
+- **[{{ post.title }}]({{ post.url | relative_url }})** — {{ post.date | date: "%B %d, %Y" }}
   
   {{ post.excerpt | strip_html | truncatewords: 20 }}
 
