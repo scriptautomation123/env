@@ -1,6 +1,6 @@
 # GitHub Pages Jekyll Configuration
 # Theme: Just the Docs (modern, responsive, professional)
-theme: just-the-docs
+theme: modern
 
 title: Principal Engineer Blog
 description: Engineering insights on OpenClaw, OpenShift, and cloud-native architecture
