@@ -1,0 +1,485 @@
+###############################################################################
+# rules.yaml — Detection rules for JBoss → Spring Boot Embedded Tomcat
+#               migration analysis
+#
+# Each rule has:
+#   category   : grouping for the report
+#   id         : unique rule identifier
+#   name       : short human-readable label
+#   severity   : critical | high | medium | low | info
+#   description: what the rule detects
+#   action     : recommended refactoring step
+#
+# Pattern types:
+#   file_glob        – file path glob patterns to look for
+#   xml_xpath        – XPath expression to evaluate in XML files
+#   file_contains    – regex to search inside matching files
+#   pom_dependency   – Maven groupId:artifactId pattern
+#   gradle_dependency – Gradle dependency notation pattern
+###############################################################################
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. JBoss / EAP Descriptors
+# ═══════════════════════════════════════════════════════════════════════════
+jboss_descriptors:
+
+  - id: JBOSS-DESC-001
+    name: "jboss-web.xml detected"
+    severity: critical
+    file_glob:
+      - "**/jboss-web.xml"
+      - "**/WEB-INF/jboss-web.xml"
+    description: >
+      JBoss-specific web descriptor that defines context root, virtual host,
+      and class-loading isolation.  Not recognised by embedded Tomcat.
+    action: >
+      Remove jboss-web.xml.  Move context-root to
+      server.servlet.context-path in application.properties or the
+      SERVER_SERVLET_CONTEXT_PATH environment variable.
+
+  - id: JBOSS-DESC-002
+    name: "jboss-deployment-structure.xml detected"
+    severity: critical
+    file_glob:
+      - "**/jboss-deployment-structure.xml"
+      - "**/META-INF/jboss-deployment-structure.xml"
+      - "**/WEB-INF/jboss-deployment-structure.xml"
+    description: >
+      Controls JBoss module class-loading (exclusions, dependencies).
+      Has no equivalent in embedded Tomcat.
+    action: >
+      Remove the file.  Resolve any class-loading conflicts by managing
+      Maven dependency scopes and exclusions in pom.xml instead.
+
+  - id: JBOSS-DESC-003
+    name: "jboss-ejb3.xml detected"
+    severity: high
+    file_glob:
+      - "**/jboss-ejb3.xml"
+      - "**/META-INF/jboss-ejb3.xml"
+    description: >
+      JBoss-specific EJB3 deployment descriptor.  Indicates EJB usage that
+      must be refactored to Spring-managed beans.
+    action: >
+      Replace EJBs with Spring @Service / @Component beans.  Remove the
+      descriptor after migration.
+
+  - id: JBOSS-DESC-004
+    name: "jboss-service.xml detected"
+    severity: high
+    file_glob:
+      - "**/jboss-service.xml"
+      - "**/META-INF/jboss-service.xml"
+    description: >
+      JBoss MBean service descriptor.  Not supported on embedded Tomcat.
+    action: >
+      Replace with Spring Boot auto-configuration or custom
+      @Configuration beans.
+
+  - id: JBOSS-DESC-005
+    name: "jboss-classloading.xml detected"
+    severity: medium
+    file_glob:
+      - "**/jboss-classloading.xml"
+    description: >
+      Legacy JBoss class-loading isolation descriptor.
+    action: >
+      Remove.  Embedded Tomcat uses a flat class-path; manage conflicts
+      via Maven dependency exclusions.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Build System
+# ═══════════════════════════════════════════════════════════════════════════
+build_system:
+
+  - id: BUILD-001
+    name: "WAR packaging type"
+    severity: info
+    file_glob: ["**/pom.xml"]
+    file_contains: "<packaging>war</packaging>"
+    description: >
+      Project is already configured for WAR packaging.  Executable WAR
+      requires the spring-boot-maven-plugin repackage goal.
+    action: >
+      Ensure spring-boot-maven-plugin is present with <goal>repackage</goal>
+      so the WAR is executable (java -jar app.war).
+
+  - id: BUILD-002
+    name: "EAR packaging type"
+    severity: critical
+    file_glob: ["**/pom.xml"]
+    file_contains: "<packaging>ear</packaging>"
+    description: >
+      EAR packaging is used for multi-module JBoss deployments and is not
+      supported by Spring Boot embedded Tomcat.
+    action: >
+      Restructure into a single Spring Boot WAR (or JAR) module.
+
+  - id: BUILD-003
+    name: "JBoss EAP BOM / dependency"
+    severity: critical
+    pom_dependency:
+      - "org.jboss.bom:*"
+      - "org.jboss.eap:*"
+      - "org.wildfly:*"
+      - "org.wildfly.bom:*"
+    description: >
+      JBoss/WildFly BOM or dependency detected.  These pull in
+      server-managed libraries that conflict with embedded Tomcat.
+    action: >
+      Remove JBoss BOMs and replace with spring-boot-starter-* managed
+      dependencies.
+
+  - id: BUILD-004
+    name: "JBoss-specific Maven plugins"
+    severity: high
+    file_glob: ["**/pom.xml"]
+    file_contains:
+      - "jboss-as-maven-plugin"
+      - "wildfly-maven-plugin"
+      - "jboss-packaging-maven-plugin"
+    description: >
+      JBoss deployment Maven plugin detected.
+    action: >
+      Remove the JBoss plugin.  Use spring-boot-maven-plugin for
+      packaging and the container image plugin (jib / buildpacks) for
+      OCI image builds.
+
+  - id: BUILD-005
+    name: "Missing spring-boot-maven-plugin"
+    severity: high
+    file_glob: ["**/pom.xml"]
+    file_contains: "spring-boot-maven-plugin"
+    negate: true
+    description: >
+      The spring-boot-maven-plugin is missing.  Without it the WAR will
+      not be executable.
+    action: >
+      Add spring-boot-maven-plugin with <goal>repackage</goal> to the
+      build plugins section.
+
+  - id: BUILD-006
+    name: "Provided-scope Tomcat dependency missing"
+    severity: medium
+    file_glob: ["**/pom.xml"]
+    file_contains: "spring-boot-starter-tomcat"
+    description: >
+      For an executable WAR that also deploys to an external container,
+      spring-boot-starter-tomcat should be scope=provided.
+    action: >
+      If targeting executable WAR only (no external Tomcat), embedded
+      Tomcat scope should be compile (default).  If dual-mode is needed,
+      set scope to provided.
+
+  - id: BUILD-007
+    name: "Spring Boot version"
+    severity: info
+    file_glob: ["**/pom.xml"]
+    file_contains: "spring-boot-starter-parent"
+    description: >
+      Detects the Spring Boot parent version to assess PEM TLS support
+      (requires 3.1+) and Jakarta namespace migration (requires 3.0+).
+    action: >
+      Upgrade to Spring Boot 3.1+ for native PEM TLS support and
+      Jakarta EE 10 namespace.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Source Code Patterns
+# ═══════════════════════════════════════════════════════════════════════════
+source_code:
+
+  - id: SRC-001
+    name: "JBoss-specific imports"
+    severity: high
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "import org\\.jboss\\."
+      - "import org\\.wildfly\\."
+    description: >
+      Java source files import JBoss/WildFly-specific classes.
+    action: >
+      Replace with Spring Framework or Jakarta EE standard equivalents.
+
+  - id: SRC-002
+    name: "JNDI lookup usage"
+    severity: high
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "InitialContext"
+      - "Context\\.lookup"
+      - "java:jboss/"
+      - "java:comp/env"
+      - "java:/jdbc"
+      - "java:global/"
+    description: >
+      JNDI lookups detected.  Embedded Tomcat does not provide the full
+      JNDI tree that JBoss/EAP does.
+    action: >
+      Replace JNDI datasource lookups with Spring Boot auto-configured
+      DataSource beans (spring.datasource.* properties).  Replace other
+      JNDI resources with Spring @Bean definitions.
+
+  - id: SRC-003
+    name: "EJB annotations"
+    severity: critical
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "@Stateless"
+      - "@Stateful"
+      - "@Singleton.*javax\\.ejb"
+      - "@MessageDriven"
+      - "@Remote"
+      - "@Local"
+      - "import javax\\.ejb\\."
+      - "import jakarta\\.ejb\\."
+    description: >
+      EJB annotations detected.  Spring Boot embedded Tomcat does not
+      include an EJB container.
+    action: >
+      Refactor EJBs to Spring @Service / @Component beans.  Replace
+      @MessageDriven with Spring JMS @JmsListener or Spring AMQP
+      @RabbitListener.
+
+  - id: SRC-004
+    name: "SpringBootServletInitializer present"
+    severity: info
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "extends SpringBootServletInitializer"
+    description: >
+      Application already extends SpringBootServletInitializer —
+      required for executable WAR deployment.
+    action: >
+      No action needed.  Verify the configure() method overrides
+      SpringApplicationBuilder correctly.
+
+  - id: SRC-005
+    name: "SpringBootServletInitializer missing"
+    severity: high
+    file_glob: ["**/*.java"]
+    file_contains: "extends SpringBootServletInitializer"
+    negate: true
+    description: >
+      No class extending SpringBootServletInitializer found.  This is
+      required for WAR packaging to work.
+    action: >
+      Have the main @SpringBootApplication class extend
+      SpringBootServletInitializer and override configure().
+
+  - id: SRC-006
+    name: "javax.* namespace (pre-Jakarta)"
+    severity: medium
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "import javax\\.servlet\\."
+      - "import javax\\.persistence\\."
+      - "import javax\\.inject\\."
+      - "import javax\\.ws\\.rs\\."
+    description: >
+      javax.* namespace imports detected.  Spring Boot 3.x requires
+      the jakarta.* namespace (Jakarta EE 10).
+    action: >
+      Migrate all javax.* imports to jakarta.* equivalents.  Use
+      OpenRewrite or IntelliJ migration tooling for bulk conversion.
+
+  - id: SRC-007
+    name: "JAX-RS annotations"
+    severity: high
+    file_glob: ["**/*.java"]
+    file_contains:
+      - "@Path"
+      - "@GET"
+      - "@POST"
+      - "@PUT"
+      - "@DELETE"
+      - "import javax\\.ws\\.rs\\."
+      - "import jakarta\\.ws\\.rs\\."
+    description: >
+      JAX-RS REST annotations detected.  Spring Boot uses Spring MVC
+      (@RestController, @GetMapping, etc.) by default.
+    action: >
+      Replace JAX-RS annotations with Spring MVC equivalents, or add
+      the spring-boot-starter-jersey dependency to keep JAX-RS support.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. TLS / SSL Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+tls_ssl:
+
+  - id: TLS-001
+    name: "JKS keystore configuration"
+    severity: high
+    file_glob:
+      - "**/application.properties"
+      - "**/application.yml"
+      - "**/application-*.properties"
+      - "**/application-*.yml"
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+    file_contains:
+      - "server\\.ssl\\.key-store-type.*JKS"
+      - "SERVER_SSL_KEY_STORE_TYPE.*JKS"
+      - "\\.jks"
+    description: >
+      JKS keystore detected.  JKS is a legacy Java-specific format.
+    action: >
+      Migrate to PEM certificates using Spring Boot 3.1+
+      server.ssl.certificate / server.ssl.certificate-private-key,
+      or at minimum convert to PKCS12 as an intermediate step.
+
+  - id: TLS-002
+    name: "PKCS12 keystore configuration"
+    severity: medium
+    file_glob:
+      - "**/application.properties"
+      - "**/application.yml"
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+    file_contains:
+      - "server\\.ssl\\.key-store-type.*PKCS12"
+      - "SERVER_SSL_KEY_STORE_TYPE.*PKCS12"
+      - "\\.p12"
+    description: >
+      PKCS12 keystore detected.  Works with embedded Tomcat but adds
+      operational overhead (keytool conversion, password management).
+    action: >
+      If using Spring Boot 3.1+, migrate to PEM-based TLS to eliminate
+      the keystore build step and password management.
+
+  - id: TLS-003
+    name: "Legacy JBoss EAP cert mount path"
+    severity: high
+    file_glob:
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+      - "**/Dockerfile"
+      - "**/*.properties"
+      - "**/*.yml"
+    file_contains:
+      - "/opt/eap/"
+      - "/opt/jboss/"
+    description: >
+      Legacy JBoss EAP file path detected in mount or configuration.
+    action: >
+      Replace with standard Linux FHS path (/etc/tls/private) or
+      application-specific path (/app/certs).
+
+  - id: TLS-004
+    name: "PEM TLS already configured"
+    severity: info
+    file_glob:
+      - "**/application.properties"
+      - "**/application.yml"
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+    file_contains:
+      - "server\\.ssl\\.certificate"
+      - "SERVER_SSL_CERTIFICATE"
+    description: >
+      PEM-based TLS configuration detected (Spring Boot 3.1+).
+    action: >
+      No action needed — already using the recommended approach.
+
+  - id: TLS-005
+    name: "Keystore password in plain text"
+    severity: critical
+    file_glob:
+      - "**/application.properties"
+      - "**/application.yml"
+      - "**/*-dc.yaml"
+    file_contains:
+      - "server\\.ssl\\.key-store-password\\s*="
+      - "SERVER_SSL_KEY_STORE_PASSWORD.*value:"
+    description: >
+      Keystore password appears in configuration as a plain-text value
+      (not from a Secret reference).
+    action: >
+      If retaining a keystore, source the password from a Kubernetes
+      Secret (secretKeyRef).  Better yet, migrate to PEM TLS to
+      eliminate passwords entirely.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Deployment / Container Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+deployment:
+
+  - id: DEPLOY-001
+    name: "DeploymentConfig (OpenShift legacy)"
+    severity: medium
+    file_glob:
+      - "**/*-dc.yaml"
+      - "**/*-dc.yml"
+    file_contains: "kind: DeploymentConfig"
+    description: >
+      OpenShift DeploymentConfig detected.  DeploymentConfig is
+      deprecated in favour of standard Kubernetes Deployment.
+    action: >
+      Migrate to kind: Deployment (apps/v1) for portability.  Replace
+      OpenShift triggers with CI/CD pipeline-driven rollouts.
+
+  - id: DEPLOY-002
+    name: "JBoss base image in Dockerfile"
+    severity: critical
+    file_glob:
+      - "**/Dockerfile"
+      - "**/Dockerfile.*"
+      - "**/Containerfile"
+    file_contains:
+      - "jboss/wildfly"
+      - "jboss-eap"
+      - "registry.redhat.io/jboss-eap"
+      - "quay.io/wildfly"
+    description: >
+      JBoss/WildFly/EAP base image detected in container build file.
+    action: >
+      Replace with a minimal JDK base image (e.g., eclipse-temurin:21-jre,
+      registry.access.redhat.com/ubi9/openjdk-21-runtime).
+
+  - id: DEPLOY-003
+    name: "Legacy JAVA_TOOL_OPTIONS"
+    severity: medium
+    file_glob:
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+      - "**/Dockerfile"
+    file_contains:
+      - "--add-opens=jdk.management"
+      - "--add-opens=java.management"
+      - "--add-opens=java.base/java.lang"
+      - "--add-opens=java.rmi"
+    description: >
+      Excessive --add-opens JVM flags detected.  These are often
+      workarounds for JBoss EAP reflective access on JDK 17+.
+    action: >
+      Review each --add-opens flag.  Most are unnecessary with Spring
+      Boot embedded Tomcat on JDK 21.  Remove flags that are no longer
+      needed and test thoroughly.
+
+  - id: DEPLOY-004
+    name: "Health probes not configured"
+    severity: high
+    file_glob:
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+    file_contains: "readinessProbe"
+    negate: true
+    description: >
+      No readinessProbe detected in deployment manifest.
+    action: >
+      Add readiness, liveness, and startup probes using Spring Boot
+      Actuator health endpoints (/actuator/health/readiness, etc.).
+
+  - id: DEPLOY-005
+    name: "JAVA_APP_JAR environment variable"
+    severity: medium
+    file_glob:
+      - "**/*-dc.yaml"
+      - "**/*-deployment.yaml"
+    file_contains: "JAVA_APP_JAR"
+    description: >
+      JAVA_APP_JAR env var detected — often a Red Hat s2i / JBoss image
+      convention.  Not needed with Spring Boot executable WAR/JAR.
+    action: >
+      Remove JAVA_APP_JAR.  Use a Dockerfile ENTRYPOINT that runs
+      java -jar /app/app.war, or rely on the Spring Boot layered-jar
+      launcher in the container image.
