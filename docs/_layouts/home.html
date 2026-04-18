@@ -1,0 +1,156 @@
+---
+layout: default
+---
+
+<!-- Hero Section -->
+<section class="hero">
+  <div class="hero-container">
+    <div class="hero-content">
+      <div class="hero-badge animate-fade-in">Engineering Blog</div>
+      <h1 class="hero-title animate-fade-in-up">
+        Deep Technical Insights for
+        <span class="gradient-text">Cloud-Native Architecture</span>
+      </h1>
+      <p class="hero-subtitle animate-fade-in-up delay-1">
+        {{ site.description }}
+      </p>
+      <div class="hero-actions animate-fade-in-up delay-2">
+        <a href="{{ '/blog/' | relative_url }}" class="btn btn-primary">
+          Read Articles
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+        <a href="https://github.com/{{ site.repository }}" class="btn btn-secondary" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View Source
+        </a>
+      </div>
+    </div>
+    <div class="hero-visual animate-fade-in delay-2">
+      <div class="code-window">
+        <div class="code-window-header">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="code-window-title">principal-engineer.yaml</span>
+        </div>
+        <pre class="code-window-body"><code><span class="code-key">engineer</span>:
+  <span class="code-key">role</span>: <span class="code-string">"Principal Engineer"</span>
+  <span class="code-key">focus</span>:
+    - <span class="code-string">cloud-native architecture</span>
+    - <span class="code-string">container orchestration</span>
+    - <span class="code-string">AI-driven automation</span>
+  <span class="code-key">stack</span>:
+    <span class="code-key">platform</span>: <span class="code-string">OpenShift / Kubernetes</span>
+    <span class="code-key">runtime</span>: <span class="code-string">Spring Boot 3</span>
+    <span class="code-key">tools</span>: <span class="code-string">AI Agents + Static Analysis</span>
+  <span class="code-key">mission</span>: <span class="code-string">"Eliminate toil, amplify expertise"</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats Section -->
+<section class="stats-section">
+  <div class="stats-container">
+    <div class="stat-card animate-on-scroll">
+      <div class="stat-number">{{ site.posts | size }}</div>
+      <div class="stat-label">Technical Articles</div>
+    </div>
+    <div class="stat-card animate-on-scroll">
+      <div class="stat-number">5+</div>
+      <div class="stat-label">Core Topics</div>
+    </div>
+    <div class="stat-card animate-on-scroll">
+      <div class="stat-number">25+</div>
+      <div class="stat-label">Migration Rules</div>
+    </div>
+    <div class="stat-card animate-on-scroll">
+      <div class="stat-number">$876K</div>
+      <div class="stat-label">Potential Savings Documented</div>
+    </div>
+  </div>
+</section>
+
+<!-- Featured Articles -->
+<section class="featured-section">
+  <div class="section-container">
+    <div class="section-header animate-on-scroll">
+      <h2 class="section-title">Latest Articles</h2>
+      <p class="section-subtitle">In-depth explorations of enterprise engineering challenges and solutions</p>
+    </div>
+    <div class="post-grid">
+      {% for post in site.posts %}
+      <article class="post-card animate-on-scroll">
+        <div class="post-card-header">
+          <div class="post-card-tags">
+            {% for category in post.categories limit:2 %}
+            <span class="tag tag-{{ category | slugify }}">{{ category }}</span>
+            {% endfor %}
+          </div>
+          <time class="post-card-date" datetime="{{ post.date | date_to_xmlschema }}">
+            {{ post.date | date: "%b %d, %Y" }}
+          </time>
+        </div>
+        <h3 class="post-card-title">
+          <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
+        </h3>
+        <p class="post-card-excerpt">{{ post.excerpt | strip_html | truncatewords: 30 }}</p>
+        <div class="post-card-footer">
+          <div class="post-card-author">
+            <div class="author-avatar">PE</div>
+            <span>{{ post.author | default: "Principal Engineer" }}</span>
+          </div>
+          <a href="{{ post.url | relative_url }}" class="post-card-link">
+            Read more
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- Topics Section -->
+<section class="topics-section">
+  <div class="section-container">
+    <div class="section-header animate-on-scroll">
+      <h2 class="section-title">Core Topics</h2>
+      <p class="section-subtitle">Areas of deep technical expertise and active research</p>
+    </div>
+    <div class="topics-grid">
+      <div class="topic-card animate-on-scroll">
+        <div class="topic-icon">🏗️</div>
+        <h3>Cloud-Native Architecture</h3>
+        <p>Designing resilient, scalable systems on Kubernetes and OpenShift with modern deployment patterns.</p>
+      </div>
+      <div class="topic-card animate-on-scroll">
+        <div class="topic-icon">🔒</div>
+        <h3>TLS &amp; Security</h3>
+        <p>Modernizing certificate management from legacy keystores to automated, cloud-native TLS with cert-manager.</p>
+      </div>
+      <div class="topic-card animate-on-scroll">
+        <div class="topic-icon">🤖</div>
+        <h3>AI-Driven Tooling</h3>
+        <p>Building intelligent agents and analyzers that amplify engineering expertise and eliminate toil.</p>
+      </div>
+      <div class="topic-card animate-on-scroll">
+        <div class="topic-icon">🔄</div>
+        <h3>Platform Migration</h3>
+        <p>Enterprise-scale migration from JBoss EAP to Spring Boot with automated discovery and planning.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta-section">
+  <div class="cta-container animate-on-scroll">
+    <h2>Explore the Engineering Insights</h2>
+    <p>Dive into detailed technical articles on cloud-native architecture, migration strategies, and AI-powered engineering tools.</p>
+    <a href="{{ '/blog/' | relative_url }}" class="btn btn-primary btn-lg">
+      Browse All Articles
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+</section>
